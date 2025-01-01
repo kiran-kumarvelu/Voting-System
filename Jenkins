@@ -1,0 +1,63 @@
+pipeline {
+    agent any
+    environment {
+        REGION = 'us-south' 
+        RESOURCE_GROUP = 'default' 
+        REGISTRY_URL = 'us.icr.io/my-voting-system' 
+        DOCKER_IMAGE_BACKEND = 'online-voting-backend:latest' 
+        DOCKER_IMAGE_FRONTEND = 'online-voting-frontend:latest' 
+        CLUSTER_NAME = 'online-voting-cluster'
+    }
+    stages {
+        stage('Prepare Environment') {
+            steps {
+                script {
+                    bat '''
+                    echo MONGO_URI=${MONGO_URI} > .env
+                    echo JWT_SECRET=${JWT_SECRET} >> .env
+                    '''
+                }
+            }
+        }
+        stage('Build Backend and Frontend Docker Images') {
+            steps {
+                script {
+                    bat 'docker build -t ${DOCKER_IMAGE_BACKEND} ./server'
+                    bat 'docker build -t ${DOCKER_IMAGE_FRONTEND} ./client'
+                }
+            }
+        }
+        stage('Push Docker Images to IBM Cloud Container Registry') {
+            steps {
+                script {
+                    bat 'ibmcloud login --apikey ${API_KEY} -r ${REGION} -g ${RESOURCE_GROUP}'
+                    bat 'ibmcloud cr login'
+                    bat 'docker tag ${DOCKER_IMAGE_BACKEND} ${REGISTRY_URL}/${DOCKER_IMAGE_BACKEND}'
+                    bat 'docker tag ${DOCKER_IMAGE_FRONTEND} ${REGISTRY_URL}/${DOCKER_IMAGE_FRONTEND}'
+                    bat 'docker push ${REGISTRY_URL}/${DOCKER_IMAGE_BACKEND}'
+                    bat 'docker push ${REGISTRY_URL}/${DOCKER_IMAGE_FRONTEND}'
+                }
+            }
+   
+     }
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    bat '''
+                    ibmcloud ks cluster config --cluster ${CLUSTER_NAME}
+                    kubectl apply -f k8s/deployment-backend.yaml
+                    kubectl apply -f k8s/deployment-frontend.yaml
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo 'Pipeline executed successfully.'
+        }
+        failure {
+            echo 'Pipeline failed. Please check the logs.'
+        }
+    }
+}
